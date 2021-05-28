@@ -126,6 +126,7 @@ found:
   memset(&p->context, 0, sizeof(p->context));
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
+  p->trace_mask = 0;
 
   return p;
 }
@@ -274,6 +275,7 @@ fork(void)
     return -1;
   }
   np->sz = p->sz;
+  np->trace_mask = p->trace_mask;
 
   np->parent = p;
 
