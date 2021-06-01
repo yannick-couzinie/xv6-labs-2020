@@ -4,6 +4,7 @@
 #include "date.h"
 #include "param.h"
 #include "memlayout.h"
+#include "sysinfo.h"
 #include "spinlock.h"
 #include "proc.h"
 
@@ -109,5 +110,8 @@ sys_trace(void)
 uint64
 sys_sysinfo(void)
 {
-  return 0;
+  uint64 si; // user pointer to struct sysinfo
+  if(argaddr(0, &si) < 0)
+    return -1;
+  return sysinfo((struct sysinfo *) si);
 }
