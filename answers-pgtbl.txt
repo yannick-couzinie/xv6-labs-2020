@@ -1,3 +1,7 @@
 Page 0 contains first the pagetable with the program that is loaded into memory
 at the very beginning of exec. Page 1 is the guard page which prevents the
 stack in page 2 from overflowing. Thus page 1 is not accessible.
+
+First of all srcva+len<srcva if len<0 which should be excluded. Then it also
+protects against overflows, but in a correctly programmed kernel I would expect
+that p->sz<=PLIC so that overflows are precluded.

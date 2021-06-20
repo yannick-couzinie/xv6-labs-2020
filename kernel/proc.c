@@ -237,6 +237,7 @@ userinit(void)
   // and data into it.
   uvminit(p->pagetable, initcode, sizeof(initcode));
   p->sz = PGSIZE;
+  k_uvmalloc(p->kpagetable, p->pagetable, 0, PGSIZE);
 
   // prepare for the very first "return" from kernel to user.
   p->trapframe->epc = 0;      // user program counter
@@ -259,12 +260,18 @@ growproc(int n)
   struct proc *p = myproc();
 
   sz = p->sz;
+
+  if (sz + n >= PLIC)
+    return -1;
+
   if(n > 0){
     if((sz = uvmalloc(p->pagetable, sz, sz + n)) == 0) {
       return -1;
     }
+    k_uvmalloc(p->kpagetable, p->pagetable, p->sz, p->sz+n);
   } else if(n < 0){
     sz = uvmdealloc(p->pagetable, sz, sz + n);
+    k_uvmdealloc(p->kpagetable, p->sz, p->sz + n);
   }
   p->sz = sz;
   return 0;
@@ -290,6 +297,9 @@ fork(void)
     release(&np->lock);
     return -1;
   }
+  k_uvmdealloc(np->kpagetable, np->sz, 0);
+  k_uvmalloc(np->kpagetable, np->pagetable, 0, p->sz);
+
   np->sz = p->sz;
 
   np->parent = p;

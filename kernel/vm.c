@@ -22,6 +22,10 @@ void
 kvminit()
 {
   kernel_pagetable = kvminit_new_pgtbl();
+  // CLINT, only needed for startup so not on process kernel table
+  // at least it is below PLIC so inteferes when we want to have user mappings
+  // below PLIC on the per process kpagetable
+  kvmmap_pgtbl(kernel_pagetable, CLINT, CLINT, 0x10000, PTE_R | PTE_W);
 }
 
 /*
@@ -39,8 +43,6 @@ kvminit_new_pgtbl()
    // virtio mmio disk interface
   kvmmap_pgtbl(kpagetable, VIRTIO0, VIRTIO0, PGSIZE, PTE_R | PTE_W);
  
-   // CLINT
-  kvmmap_pgtbl(kpagetable, CLINT, CLINT, 0x10000, PTE_R | PTE_W);
  
    // PLIC
   kvmmap_pgtbl(kpagetable, PLIC, PLIC, 0x400000, PTE_R | PTE_W);
@@ -256,6 +258,9 @@ uvmalloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz)
   if(newsz < oldsz)
     return oldsz;
 
+  if(newsz > PLIC)
+    panic("uvmalloc");
+
   oldsz = PGROUNDUP(oldsz);
   for(a = oldsz; a < newsz; a += PGSIZE){
     mem = kalloc();
@@ -267,6 +272,29 @@ uvmalloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz)
     if(mappages(pagetable, a, PGSIZE, (uint64)mem, PTE_W|PTE_X|PTE_R|PTE_U) != 0){
       kfree(mem);
       uvmdealloc(pagetable, a, oldsz);
+      return 0;
+    }
+  }
+  return newsz;
+}
+
+// uvmalloc version for kpagetable which assumes that an equivalent call to
+// uvmalloc for the user pagetable has been done before the call to this
+// function so that we cann add pagetables to kpagetable with reading
+// permissions which refer to the memory in the user stack
+uint64
+k_uvmalloc(pagetable_t kpagetable, pagetable_t pagetable, uint64 oldsz, uint64 newsz)
+{
+  uint64 a;
+  pte_t *pte = 0;
+
+  oldsz = PGROUNDUP(oldsz);
+  for(a = oldsz; a < newsz; a += PGSIZE){
+    if ((pte = walk(pagetable, a, 0)) == 0)
+      panic("k_uvmalloc");
+
+    if(mappages(kpagetable, a, PGSIZE, PTE2PA(*pte), PTE_R|PTE_W) != 0){
+      uvmdealloc(kpagetable, a, oldsz);
       return 0;
     }
   }
@@ -286,6 +314,21 @@ uvmdealloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz)
   if(PGROUNDUP(newsz) < PGROUNDUP(oldsz)){
     int npages = (PGROUNDUP(oldsz) - PGROUNDUP(newsz)) / PGSIZE;
     uvmunmap(pagetable, PGROUNDUP(newsz), npages, 1);
+  }
+
+  return newsz;
+}
+
+// same as uvmdealloc but does not free underlying memory
+uint64
+k_uvmdealloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz)
+{
+  if(newsz >= oldsz)
+    return oldsz;
+
+  if(PGROUNDUP(newsz) < PGROUNDUP(oldsz)){
+    int npages = (PGROUNDUP(oldsz) - PGROUNDUP(newsz)) / PGSIZE;
+    uvmunmap(pagetable, PGROUNDUP(newsz), npages, 0);
   }
 
   return newsz;
@@ -418,23 +461,24 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 int
 copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
 {
-  uint64 n, va0, pa0;
+  /* uint64 n, va0, pa0; */
 
-  while(len > 0){
-    va0 = PGROUNDDOWN(srcva);
-    pa0 = walkaddr(pagetable, va0);
-    if(pa0 == 0)
-      return -1;
-    n = PGSIZE - (srcva - va0);
-    if(n > len)
-      n = len;
-    memmove(dst, (void *)(pa0 + (srcva - va0)), n);
+  /* while(len > 0){ */
+  /*   va0 = PGROUNDDOWN(srcva); */
+  /*   pa0 = walkaddr(pagetable, va0); */
+  /*   if(pa0 == 0) */
+  /*     return -1; */
+  /*   n = PGSIZE - (srcva - va0); */
+  /*   if(n > len) */
+  /*     n = len; */
+  /*   memmove(dst, (void *)(pa0 + (srcva - va0)), n); */
 
-    len -= n;
-    dst += n;
-    srcva = va0 + PGSIZE;
-  }
-  return 0;
+  /*   len -= n; */
+  /*   dst += n; */
+  /*   srcva = va0 + PGSIZE; */
+  /* } */
+  /* return 0; */
+  return copyin_new(pagetable, dst, srcva, len);
 }
 
 // Copy a null-terminated string from user to kernel.
@@ -444,40 +488,41 @@ copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
 int
 copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
 {
-  uint64 n, va0, pa0;
-  int got_null = 0;
+  return copyinstr_new(pagetable, dst, srcva, max);
+  /* uint64 n, va0, pa0; */
+  /* int got_null = 0; */
 
-  while(got_null == 0 && max > 0){
-    va0 = PGROUNDDOWN(srcva);
-    pa0 = walkaddr(pagetable, va0);
-    if(pa0 == 0)
-      return -1;
-    n = PGSIZE - (srcva - va0);
-    if(n > max)
-      n = max;
+  /* while(got_null == 0 && max > 0){ */
+  /*   va0 = PGROUNDDOWN(srcva); */
+  /*   pa0 = walkaddr(pagetable, va0); */
+  /*   if(pa0 == 0) */
+  /*     return -1; */
+  /*   n = PGSIZE - (srcva - va0); */
+  /*   if(n > max) */
+  /*     n = max; */
 
-    char *p = (char *) (pa0 + (srcva - va0));
-    while(n > 0){
-      if(*p == '\0'){
-        *dst = '\0';
-        got_null = 1;
-        break;
-      } else {
-        *dst = *p;
-      }
-      --n;
-      --max;
-      p++;
-      dst++;
-    }
+  /*   char *p = (char *) (pa0 + (srcva - va0)); */
+  /*   while(n > 0){ */
+  /*     if(*p == '\0'){ */
+  /*       *dst = '\0'; */
+  /*       got_null = 1; */
+  /*       break; */
+  /*     } else { */
+  /*       *dst = *p; */
+  /*     } */
+  /*     --n; */
+  /*     --max; */
+  /*     p++; */
+  /*     dst++; */
+  /*   } */
 
-    srcva = va0 + PGSIZE;
-  }
-  if(got_null){
-    return 0;
-  } else {
-    return -1;
-  }
+  /*   srcva = va0 + PGSIZE; */
+  /* } */
+  /* if(got_null){ */
+  /*   return 0; */
+  /* } else { */
+  /*   return -1; */
+  /* } */
 }
 
 
@@ -488,6 +533,11 @@ recurse_pgtbls(pagetable_t pagetable, int level)
   for(int i = 0; i < 512; i++){
     pte_t pte = pagetable[i];
     if (pte & PTE_V){
+      // skip kernel portions of pagetable, also skips trampoline part
+      // comment to get exercise conforming vmprint
+      /* if ((level == 1 && i >= PX(1, PLIC)) || (level == 0 && i>0)){ */
+      /*   continue; */ 
+      /* } */
       for (int j=0; j < level; j++)
         printf(".. ");
       printf("..%d: pte %p pa %p", i, pte, PTE2PA(pte));
@@ -517,6 +567,50 @@ recurse_pgtbls(pagetable_t pagetable, int level)
 void
 vmprint(pagetable_t pagetable)
 {
+  /* printf("MAXVA: %d\n", PX(0, MAXVA)); */
+  /* printf("MAXVA: %d\n", PX(1, MAXVA)); */
+  /* printf("MAXVA: %d\n", PX(2, MAXVA)); */
+  /* printf("PLIC: %d\n", PX(0, PLIC)); */
+  /* printf("PLIC: %d\n", PX(1, PLIC)); */
+  /* printf("PLIC: %d\n", PX(2, PLIC)); */
+  /* printf("PHYSTOP: %d\n", PX(0, PHYSTOP)); */
+  /* printf("PHYSTOP: %d\n", PX(1, PHYSTOP)); */
+  /* printf("PHYSTOP: %d\n", PX(2, PHYSTOP)); */
   printf("page table %p\n", pagetable);
   recurse_pgtbls(pagetable, 0);
+}
+
+void
+k_recurse_pgtbls(pagetable_t pagetable, int level)
+{
+  // there are 2^9 = 512 PTEs in a page table.
+  for(int i = 0; i < 512; i++){
+    pte_t pte = pagetable[i];
+    if (pte & PTE_V){
+      for (int j=0; j < level; j++)
+        printf(".. ");
+      if (PTE2PA(pte) >= PLIC)
+        continue;
+      printf("..%d: pte %p pa %p", i, pte, PTE2PA(pte));
+      if(!(pte & (PTE_R|PTE_W|PTE_X))){
+        // this PTE points to a lower-level page table.
+        uint64 child = PTE2PA(pte);
+        printf("\n");
+        k_recurse_pgtbls((pagetable_t)child, level+1);
+      }
+      else{
+        // uncomment for better diagnostics on pagetables 
+        printf(" ");
+        if(pte & PTE_R)
+          printf("R");
+        if(pte & PTE_W)
+          printf("W");
+        if(pte & PTE_X)
+          printf("X");
+        if(pte & PTE_U)
+          printf("U");
+        printf("\n");
+      }
+    }
+  }
 }
