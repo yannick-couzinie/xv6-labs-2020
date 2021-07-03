@@ -122,6 +122,7 @@ panic(char *s)
   printf(s);
   printf("\n");
   panicked = 1; // freeze uart output from other CPUs
+  backtrace();
   for(;;)
     ;
 }
@@ -131,4 +132,19 @@ printfinit(void)
 {
   initlock(&pr.lock, "pr");
   pr.locking = 1;
+}
+
+void
+backtrace()
+{
+  printf("backtrace:\n");
+  uint64 fp = r_fp();
+  // the stack grows downwards so the most recent function has the lowest
+  // memory value, we go upwards when tracing back and the 'oldest' function
+  // points back to the top of the whole pagetable page.
+  uint64 pgstart = PGROUNDUP(fp);
+  while(fp != pgstart){
+    printf("%p\n", *(uint64*)(fp-8));
+    fp = *(uint64*)(fp-16);
+  }
 }
