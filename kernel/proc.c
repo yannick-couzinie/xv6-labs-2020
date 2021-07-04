@@ -106,6 +106,8 @@ allocproc(void)
 
 found:
   p->pid = allocpid();
+  p->passed = 0;
+  p->has_alarm = 0;
 
   // Allocate a trapframe page.
   if((p->trapframe = (struct trapframe *)kalloc()) == 0){
@@ -701,5 +703,10 @@ procdump(void)
 int
 sigalarm(int ticks, void (*handler)())
 {
+  struct proc *p = myproc();
+  p->ticks = ticks;
+  p->passed = 0;
+  p->handler = handler;
+  p->has_alarm = 1;
   return 0;
 }
