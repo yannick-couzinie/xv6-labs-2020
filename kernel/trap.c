@@ -79,8 +79,9 @@ usertrap(void)
   // give up the CPU if this is a timer interrupt.
   if(which_dev == 2){
     p->passed++;
-    if(p->has_alarm && (p->passed >= p->ticks)){
+    if(p->has_alarm && (p->passed == p->ticks)){
       //overwrite the saved user program counter with the handler
+      *(p->alarm_trframe) = *(p->trapframe); // save trapframe
       p->trapframe->epc = (uint64) p->handler;
     }
     yield();

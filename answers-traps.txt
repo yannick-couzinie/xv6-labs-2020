@@ -1,0 +1,23 @@
+1. As per the calling convention in this case the integer registers ax hold the
+arguments, the second argument is held in a3.
+
+2. Since f(8)+1=12 it seems that the compiler simplified that call to just 12.
+
+3. In line 30 we store the pc in ra (return address register) and jalr then
+adds 1528=0x5f8 to it, jumps to it and stores ra+1528=0x34+0x5f8=0x628 back into ra.
+
+4. pc+4=38 is in ra after the call to jalr to go to printf.
+
+5.
+57616 = 1110 0001 0001 0000 = xE110
+0x646c72 = DLR in ASCII
+Since little-endienness means that the lower memory-adresses (the ones that are
+read first) are the smaller values this means that our 0x646c72 is read
+72=R, 6c=L, 64=D, one byte at a time giving the total output HE110 WORLD. If it
+was big endian that you set i=0x726c6400. Note that the 00 is important to end
+the string., you wouldn't need to change 57616 since it is read word by word,
+i.e. 4 bytes at a time and xE110 is one byte.
+
+6. It would print the contents of the register a2, because printf expects there
+to be something in a2 based on the string argument it is passed in a0. This
+will be at best gibberish and at worst an exploit.

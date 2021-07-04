@@ -115,6 +115,11 @@ found:
     return 0;
   }
 
+  if((p->alarm_trframe = (struct trapframe *)kalloc()) == 0){
+    release(&p->lock);
+    return 0;
+  }
+
   // An empty user page table.
   p->pagetable = proc_pagetable(p);
   if(p->pagetable == 0){
@@ -698,15 +703,4 @@ procdump(void)
     printf("%d %s %s", p->pid, state, p->name);
     printf("\n");
   }
-}
-
-int
-sigalarm(int ticks, void (*handler)())
-{
-  struct proc *p = myproc();
-  p->ticks = ticks;
-  p->passed = 0;
-  p->handler = handler;
-  p->has_alarm = 1;
-  return 0;
 }
