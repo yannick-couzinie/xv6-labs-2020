@@ -1,0 +1,7 @@
+When sh.c is parsing the comand it is allocating space for the command text at
+user/sh.c:200 which calls sbrk which does not allocate the memory. The process
+finally fails when the parent waits for its child which never really started
+(since no memory allocated to arguments) and tries to free the memory which is
+not allocated which gives a pagefault (the freeing happens in wait).
+This is because sh.c execs the command which calls a fork and then immediately
+waits for it to end (user/sh.c:169).
