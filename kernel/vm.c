@@ -71,8 +71,9 @@ kvminithart()
 pte_t *
 walk(pagetable_t pagetable, uint64 va, int alloc)
 {
-  if(va >= MAXVA)
+  if(va >= MAXVA){
     panic("walk");
+  }
 
   for(int level = 2; level > 0; level--) {
     pte_t *pte = &pagetable[PX(level, va)];
@@ -181,15 +182,21 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
 
   for(a = va; a < va + npages*PGSIZE; a += PGSIZE){
     if((pte = walk(pagetable, a, 0)) == 0)
-      panic("uvmunmap: walk");
-    /* if((*pte & PTE_V) == 0) */
-    /*   panic("uvmunmap: not mapped"); */
+      continue;
+      // walk will just calculate the pte it expects to be there without
+      // allocating, but if higher level pages are not allocated it just
+      // returns 0, this happens if we have unallocated pages that walk
+      // expects to be there by the non-lazy allocation, just skip this
+    if((*pte & PTE_V) == 0)
+      continue;
+      // if higher level pages are allocated but on the last level the page is
+      // not allocated then we get this case.
     if(PTE_FLAGS(*pte) == PTE_V)
       panic("uvmunmap: not a leaf");
-    /* if(do_free){ */
-    /*   uint64 pa = PTE2PA(*pte); */
-    /*   kfree((void*)pa); */
-    /* } */
+    if(do_free){
+      uint64 pa = PTE2PA(*pte);
+      kfree((void*)pa);
+    }
     *pte = 0;
   }
 }
@@ -315,9 +322,11 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
 
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walk(old, i, 0)) == 0)
-      panic("uvmcopy: pte should exist");
+      /* panic("uvmcopy: pte should exist"); */
+      continue;
     if((*pte & PTE_V) == 0)
-      panic("uvmcopy: page not present");
+      /* panic("uvmcopy: page not present"); */
+      continue;
     pa = PTE2PA(*pte);
     flags = PTE_FLAGS(*pte);
     if((mem = kalloc()) == 0)
@@ -438,5 +447,54 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
     return 0;
   } else {
     return -1;
+  }
+}
+
+void
+vmprint(pagetable_t pagetable)
+{
+  /* printf("MAXVA: %d\n", PX(0, MAXVA)); */
+  /* printf("MAXVA: %d\n", PX(1, MAXVA)); */
+  /* printf("MAXVA: %d\n", PX(2, MAXVA)); */
+  /* printf("PLIC: %d\n", PX(0, PLIC)); */
+  /* printf("PLIC: %d\n", PX(1, PLIC)); */
+  /* printf("PLIC: %d\n", PX(2, PLIC)); */
+  /* printf("PHYSTOP: %d\n", PX(0, PHYSTOP)); */
+  /* printf("PHYSTOP: %d\n", PX(1, PHYSTOP)); */
+  /* printf("PHYSTOP: %d\n", PX(2, PHYSTOP)); */
+  printf("page table %p\n", pagetable);
+  recurse_pgtbls(pagetable, 0);
+}
+
+void
+recurse_pgtbls(pagetable_t pagetable, int level)
+{
+  // there are 2^9 = 512 PTEs in a page table.
+  for(int i = 0; i < 512; i++){
+    pte_t pte = pagetable[i];
+    if (pte & PTE_V){
+      for (int j=0; j < level; j++)
+        printf(".. ");
+      printf("..%d: pte %p pa %p", i, pte, PTE2PA(pte));
+      if(!(pte & (PTE_R|PTE_W|PTE_X))){
+        // this PTE points to a lower-level page table.
+        uint64 child = PTE2PA(pte);
+        printf("\n");
+        recurse_pgtbls((pagetable_t)child, level+1);
+      }
+      else{
+        // uncomment for better diagnostics on pagetables 
+        printf(" ");
+        if(pte & PTE_R)
+          printf("R");
+        if(pte & PTE_W)
+          printf("W");
+        if(pte & PTE_X)
+          printf("X");
+        if(pte & PTE_U)
+          printf("U");
+        printf("\n");
+      }
+    }
   }
 }

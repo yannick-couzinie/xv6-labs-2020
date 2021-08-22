@@ -41,15 +41,32 @@ sys_wait(void)
 uint64
 sys_sbrk(void)
 {
-  int addr;
+  uint64 addr;
   int n;
 
   if(argint(0, &n) < 0)
     return -1;
   addr = myproc()->sz;
-  /* if(growproc(n) < 0) */
-  /*   return -1; */
-  myproc()->sz += n;
+  
+  if (n>0 && addr + (uint64) n > MAXVA)
+    panic("Too big allocation\n");
+  if (n<0){
+    if (addr + n < 0){
+      if(growproc(-addr))
+        return -1;
+      else{
+        myproc()->sz = 0;
+        return 0;
+      }
+    }
+    if (addr + n >= 0 && growproc(n))
+      return -1;
+    // uvmdealloc will automatically deal with unalloced pages
+  }
+  myproc()->sz = addr + n;
+  if(myproc()->sz < 0)
+    panic("negative size\n");
+
   return addr;
 }
 

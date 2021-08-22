@@ -69,6 +69,10 @@ usertrap(void)
     // ok
   } else if(r_scause() == 13 || r_scause() == 15) {
     uint64 addr = PGROUNDDOWN(r_stval());
+    if (addr > MAXVA || addr > myproc()->sz){
+      p->killed = 1;
+      exit(-1);
+    }
     pagetable_t pagetable = p->pagetable;
     char *mem = kalloc();
     if(mem == 0){
@@ -80,7 +84,6 @@ usertrap(void)
       printf("usertrap(): could not map allocated pages after pagefault\n");
       kfree(mem);
       p->killed = 1;
-    p->trapframe->epc += 4;
     }
     }
   } else {
