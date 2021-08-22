@@ -75,6 +75,12 @@ sys_read(void)
 
   if(argfd(0, 0, &f) < 0 || argint(2, &n) < 0 || argaddr(1, &p) < 0)
     return -1;
+
+  if (walkaddr(myproc()->pagetable, p) == 0){
+    if (p<myproc()->trapframe->sp || p > myproc()->sz || lazy_alloc(myproc()->pagetable, p) == 0)
+      return -1;
+  }
+
   return fileread(f, p, n);
 }
 
@@ -87,6 +93,11 @@ sys_write(void)
 
   if(argfd(0, 0, &f) < 0 || argint(2, &n) < 0 || argaddr(1, &p) < 0)
     return -1;
+
+  if (walkaddr(myproc()->pagetable, p) == 0){
+    if (p<myproc()->trapframe->sp || p > myproc()->sz || lazy_alloc(myproc()->pagetable, p) == 0)
+      return -1;
+  }
 
   return filewrite(f, p, n);
 }
