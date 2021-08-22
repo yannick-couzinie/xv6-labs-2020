@@ -173,6 +173,7 @@ int             copyin(pagetable_t, char *, uint64, uint64);
 int             copyinstr(pagetable_t, char *, uint64, uint64);
 void            vmprint(pagetable_t);
 void            recurse_pgtbls(pagetable_t, int);
+uint64          lazy_alloc(pagetable_t, uint64);
 
 // plic.c
 void            plicinit(void);

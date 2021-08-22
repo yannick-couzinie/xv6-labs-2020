@@ -5,6 +5,8 @@
 #include "riscv.h"
 #include "defs.h"
 #include "fs.h"
+#include "spinlock.h"
+#include "proc.h"
 
 /*
  * the kernel's page table.
@@ -368,6 +370,8 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
   while(len > 0){
     va0 = PGROUNDDOWN(dstva);
     pa0 = walkaddr(pagetable, va0);
+    if(pa0 == 0 && myproc()->pagetable == pagetable && dstva < myproc()->sz)
+      pa0 = lazy_alloc(pagetable, va0);
     if(pa0 == 0)
       return -1;
     n = PGSIZE - (dstva - va0);
@@ -497,4 +501,17 @@ recurse_pgtbls(pagetable_t pagetable, int level)
       }
     }
   }
+}
+
+uint64 lazy_alloc(pagetable_t pagetable, uint64 va){
+  char *mem = kalloc();
+  va = PGROUNDDOWN(va);
+  if (mem == 0)
+    return 0;
+  memset(mem, 0, PGSIZE);
+  if (mappages(pagetable, va, PGSIZE, (uint64)mem, PTE_W|PTE_R|PTE_U) != 0) {
+    kfree(mem);
+    return 0;
+  }
+  return (uint64)mem;
 }

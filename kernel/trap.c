@@ -49,8 +49,9 @@ usertrap(void)
   
   // save user program counter.
   p->trapframe->epc = r_sepc();
+  uint64 scause = r_scause();
   
-  if(r_scause() == 8){
+  if(scause == 8){
     // system call
 
     if(p->killed)
@@ -67,24 +68,16 @@ usertrap(void)
     syscall();
   } else if((which_dev = devintr()) != 0){
     // ok
-  } else if(r_scause() == 13 || r_scause() == 15) {
-    uint64 addr = PGROUNDDOWN(r_stval());
-    if (addr > MAXVA || addr > myproc()->sz){
+  } else if(scause == 13 || scause == 15) {
+    uint64 addr = r_stval();
+    if (addr > MAXVA || addr > p->sz || addr < PGROUNDDOWN(p->trapframe->sp)){
       p->killed = 1;
       exit(-1);
-    }
-    pagetable_t pagetable = p->pagetable;
-    char *mem = kalloc();
-    if(mem == 0){
-      printf("usertrap(): could not allocate userpage after pagefault\n");
-      p->killed = 1;
     } else {
-    memset(mem, 0, PGSIZE);
-    if(mappages(pagetable, addr, PGSIZE, (uint64)mem, PTE_W|PTE_X|PTE_R|PTE_U) != 0){
-      printf("usertrap(): could not map allocated pages after pagefault\n");
-      kfree(mem);
-      p->killed = 1;
-    }
+      if(lazy_alloc(p->pagetable, addr) == 0){
+        printf("usertrap(): could not map allocated pages after pagefault\n");
+        p->killed = 1;
+      }
     }
   } else {
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);

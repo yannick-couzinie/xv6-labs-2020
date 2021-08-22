@@ -43,30 +43,22 @@ sys_sbrk(void)
 {
   uint64 addr;
   int n;
+  struct proc *p = myproc();
 
   if(argint(0, &n) < 0)
     return -1;
-  addr = myproc()->sz;
-  
-  if (n>0 && addr + (uint64) n > MAXVA)
-    panic("Too big allocation\n");
-  if (n<0){
-    if (addr + n < 0){
-      if(growproc(-addr))
-        return -1;
-      else{
-        myproc()->sz = 0;
-        return 0;
-      }
-    }
-    if (addr + n >= 0 && growproc(n))
-      return -1;
-    // uvmdealloc will automatically deal with unalloced pages
-  }
-  myproc()->sz = addr + n;
-  if(myproc()->sz < 0)
-    panic("negative size\n");
 
+  addr = p->sz;
+  
+  if (n>0) {
+    p->sz += n;
+  } else {
+    // uvmdealloc will automatically deal with unalloced pages
+    if (-n > addr)
+      p->sz = uvmdealloc(p->pagetable, p->sz, 0);
+    else
+      p->sz = uvmdealloc(p->pagetable, p->sz, addr+n);
+  }
   return addr;
 }
 
