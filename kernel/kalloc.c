@@ -134,7 +134,7 @@ cow_alloc(uint64 va, pagetable_t pagetable){
 
         memmove(mem, (char*)pa, PGSIZE);
         *pte = (PA2PTE(mem) | PTE_FLAGS(*pte) | PTE_W) & ~PTE_RSW1;
-        kdecr_ref(pa);
+        kfree((void *) pa);
       }
       return 0;
     }
