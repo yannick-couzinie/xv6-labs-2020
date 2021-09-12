@@ -71,29 +71,15 @@ usertrap(void)
     // 12 is fault because instruction executed on page
     // 13 is because of read on page
     // 15 is because of write, for us only write should matter
-    uint64 pa;
-    char *mem;
-    int flags;
-
-    if((pa = walkaddr(p->pagetable, r_stval())) != 0 && PA2PTE(pa) & PTE_RSW1){
-      // this page exists and is a COW table
-      if(kget_ref(pa) < 2)
-        panic("trap handler cow pages not enough references");
-    flags = PTE_FLAGS(PA2PTE(pa));
-    flags |= PTE_W;
-    flags &= ~PTE_RSW1;
-
-    if((mem = kalloc()) == 0){
+    uint64 va = r_stval();
+    if (va < PGROUNDDOWN(p->trapframe->sp) && va >= PGROUNDDOWN(p->trapframe->sp) - PGSIZE) {
+      // guard page
       p->killed = 1;
-      goto kill_proc;
-    }
-    memmove(mem, (char*)pa, PGSIZE);
-    if(mappages(p->pagetable, r_stval(), PGSIZE, (uint64)mem, flags) != 0){
-      p->killed = 1;
-      goto kill_proc;
-    }
-    kdecr_ref(pa);
-
+    } else {
+      if (cow_alloc(va, p->pagetable) != 0){
+        p->killed = 1;
+        goto kill_proc;
+      }
     }
   } else if((which_dev = devintr()) != 0){
     // ok
