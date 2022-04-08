@@ -1,0 +1,13 @@
+- Both threads enter put with the same key (different value possible)
+- Both look into the same bucket and see the bucket does not contain the key
+- break and enter the insert
+- Thread 2 is unscheduled now
+- Thread 1 inserts the key value pair and updates table[i] accordingly to point
+to the new entry
+- Thread 1 continues on to the next key, finds this one is missing too and
+inserts it again into the hash table.
+- Now thread 2 comes back and inserts its key value pair but starting from the
+old table pointer.
+- The key that thread 1 and thread 2 checked at the same time is present in the
+table (with a volatile value) but the additional key that thread 1 added to the
+table does not exist anymore (and in fact, is lost memory)
