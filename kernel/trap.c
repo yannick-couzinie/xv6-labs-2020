@@ -5,6 +5,7 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "defs.h"
+#include "fcntl.h"
 
 struct spinlock tickslock;
 uint ticks;
@@ -65,6 +66,10 @@ usertrap(void)
     intr_on();
 
     syscall();
+  } else if(r_scause() == 13 || r_scause() == 15) {
+    uint64 failing_addr = r_stval();
+    if(map_from_vma(failing_addr) != 0)
+      exit(-1);
   } else if((which_dev = devintr()) != 0){
     // ok
   } else {

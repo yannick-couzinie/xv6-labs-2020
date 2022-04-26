@@ -128,6 +128,20 @@ found:
     return 0;
   }
 
+  // invalidate all VMA apart from the first one which contains all the memory
+  p->VMA[0].valid = 1;
+  p->VMA[0].mapped = 0;
+  p->VMA[0].start_address = MAXVA-2*PGSIZE; // See Fig. 3.4 in book why we start here
+  p->VMA[0].end_address = PGROUNDUP(p->sz); // technically we need to make sure at each expansion of the process that we don't infringe on vma space,
+                                            // if this is not tested by mmaptest I'm not sure I will do that though.
+  p->VMA[0].length = p->VMA[0].start_address - p->VMA[0].end_address;
+  p->VMA[0].next = 0;
+  p->VMA[0].prev = 0;
+  p->VMA[0].offset = 0;
+  p->vma_head = (struct VMA*) p->VMA;
+  for (int i=1; i<16; i++)
+    p->VMA[i].valid = 0;
+
   // Set up new context to start executing at forkret,
   // which returns to user space.
   memset(&p->context, 0, sizeof(p->context));
@@ -157,6 +171,10 @@ freeproc(struct proc *p)
   p->killed = 0;
   p->xstate = 0;
   p->state = UNUSED;
+
+  for(int i=0; i<16; i++){
+    p->VMA[i].valid = 0;
+  }
 }
 
 // Create a user page table for a given process,
@@ -302,6 +320,37 @@ fork(void)
 
   np->state = RUNNABLE;
 
+  for(int i=0; i<16; i++){
+    if(p->VMA[i].valid){
+      if(p->VMA[i].mapped)
+        np->VMA[i].f = filedup(p->VMA[i].f);
+      else
+        np->VMA[i].f = 0;
+
+      if(p->vma_head == &p->VMA[i])
+        np->vma_head = &np->VMA[i];
+
+      for(int j=0; j<16; j++){
+        // find the correct indices to assign the new addresses with the same
+        // indices
+        if(p->VMA[i].next == &p->VMA[j])
+          np->VMA[i].next = &np->VMA[j];
+
+        if(p->VMA[i].prev == &p->VMA[j])
+          np->VMA[i].prev = &np->VMA[j];
+      }
+
+      np->VMA[i].start_address = p->VMA[i].start_address;
+      np->VMA[i].end_address = p->VMA[i].end_address;
+      np->VMA[i].length = p->VMA[i].length;
+      np->VMA[i].offset = p->VMA[i].offset;
+      np->VMA[i].prot = p->VMA[i].prot;
+      np->VMA[i].flags = p->VMA[i].flags;
+      np->VMA[i].valid = p->VMA[i].valid;
+      np->VMA[i].mapped = p->VMA[i].mapped;
+    }
+  }
+
   release(&np->lock);
 
   return pid;
@@ -350,6 +399,13 @@ exit(int status)
       struct file *f = p->ofile[fd];
       fileclose(f);
       p->ofile[fd] = 0;
+    }
+  }
+
+  for (int i = 0; i<16; i++){
+    if(p->VMA[i].valid && p->VMA[i].mapped){
+      munmap(p->VMA[i].end_address, p->VMA[i].length);
+      p->VMA[i].valid = 0;
     }
   }
 

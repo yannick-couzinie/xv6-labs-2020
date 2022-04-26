@@ -3,6 +3,7 @@ struct context;
 struct file;
 struct inode;
 struct pipe;
+struct VMA;
 struct proc;
 struct spinlock;
 struct sleeplock;
@@ -182,6 +183,10 @@ void            plic_complete(int);
 void            virtio_disk_init(void);
 void            virtio_disk_rw(struct buf *, int);
 void            virtio_disk_intr(void);
+
+// sysfile.c
+int             map_from_vma(uint64);
+uint64          munmap(uint64, uint64);
 
 // number of elements in fixed-size array
 #define NELEM(x) (sizeof(x)/sizeof((x)[0]))

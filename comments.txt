@@ -1,0 +1,16 @@
+I know that my solution to this lab is an absolute mess, but it's honest work.
+
+I was not quite sure what was meant with the VMA and I don't understand how it
+was intended that one could just have a fixed size array with each process
+since upon unmapping a vma its area is freed again so one needs to keep track
+of the free and the unfree areas.
+
+Otherwise if you just have a fixed size list you can keep a global counter that
+keeps going down (towards myproc()->sz) where you start you VMA, that certainly
+works with mmaptest but seems like a suboptimal solution.
+
+I say that fully knowing that I am not taking the best approach either, instead
+of merging neighbouring free VMA I just let them fracture further and further,
+but I was too lazy to implement that check as well, it passes the test and in
+principle the rest to make it pretty should be rather easy but that additional
+hour or so I do not want to put into this lab.

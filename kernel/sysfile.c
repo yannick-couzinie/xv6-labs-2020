@@ -484,3 +484,244 @@ sys_pipe(void)
   }
   return 0;
 }
+
+uint64
+sys_mmap(void)
+{
+  int i, length, prot, flags, fd, offset;
+  uint64 addr;
+  struct proc *proc;
+  struct VMA *free_memory_vma, *VMA;
+  struct file *f;
+
+  if(argaddr(0, &addr) < 0 || argint(1, &length) || argint(2, &prot)){
+    return -1;
+  }
+
+  if(argint(3, &flags) < 0 || argfd(4, &fd, &f) || argint(5, &offset)){
+    return -1;
+  }
+
+  proc = myproc();
+
+  free_memory_vma = proc->vma_head;
+
+  if (proc->sz + length > MAXVA)
+    panic("mmap");
+
+  if((prot & PROT_WRITE) && (f->writable==0) && (flags & MAP_SHARED))
+    return -1;
+
+  int found = 0;
+
+  for (i=0; i<16; i++){
+    // 16 is max index, so if we are at 17, no free VMA
+    if(!proc->VMA[i].valid){
+      VMA = &proc->VMA[i];
+      found = 1;
+      break;
+    }
+  }
+  if (!found)
+    panic("mmap: no free VMA");
+  found = 0;
+
+  free_memory_vma = proc->vma_head;
+  do{
+    if(free_memory_vma->valid && !free_memory_vma->mapped && free_memory_vma->length > length){
+      found = 1;
+      break;
+    }
+  } while((free_memory_vma = free_memory_vma->next));
+
+  if (!found)
+    panic("mmap: not enough free space");
+
+  filedup(f);
+
+  addr = free_memory_vma->start_address;
+  free_memory_vma->start_address = PGROUNDUP(free_memory_vma->start_address - PGSIZE - length);
+  free_memory_vma->length = free_memory_vma->start_address - free_memory_vma->end_address;
+  VMA->f = f;
+  VMA->start_address = addr;
+  VMA->end_address = PGROUNDDOWN(addr-length);
+  VMA->length = length;
+  VMA->offset = offset;
+  VMA->prot = prot;
+  VMA->flags = flags;
+  VMA->valid = 1;
+  VMA->mapped = 1;
+
+  if(proc->vma_head == free_memory_vma)
+    proc->vma_head = VMA;
+
+  VMA->prev = free_memory_vma->prev;
+
+  if(VMA->prev)
+    VMA->prev->next = VMA;
+
+  VMA->next = free_memory_vma;
+  free_memory_vma->prev = VMA;
+
+  free_memory_vma = proc->vma_head;
+
+  return VMA->end_address;
+}
+
+int
+map_from_vma(uint64 failing_addr)
+{
+    int prot, found = 0;
+    struct proc *p = myproc();
+    struct VMA *VMA = p->vma_head;
+    do {
+      if (VMA->mapped){
+        if (VMA->end_address <= failing_addr && VMA->start_address >= failing_addr){
+          found = 1;
+          break;
+        }
+      }
+    } while((VMA = VMA->next));
+    if(!found)
+      return -1;
+
+    if ((VMA->prot & PROT_WRITE) && (VMA->prot & PROT_READ))
+      prot = PTE_W|PTE_R|PTE_U;
+    else if (VMA->prot & PROT_WRITE)
+      prot = PTE_W|PTE_U;
+    else if (VMA->prot & PROT_READ)
+      prot = PTE_R|PTE_U;
+    else
+      panic("no prots set");
+    
+    char *mem;
+
+    if(!(mem = kalloc()))
+      panic("cannot kalloc for mapping vma");
+    memset(mem, 0, PGSIZE);
+    if(mappages(p->pagetable, failing_addr, PGSIZE, (uint64)mem, prot) != 0){
+      kfree(mem);
+      exit(-1);
+    }
+
+    ilock(VMA->f->ip);
+
+    readi(VMA->f->ip, 1, PGROUNDDOWN(failing_addr), PGROUNDDOWN(failing_addr - VMA->end_address), PGSIZE);
+    iunlock(VMA->f->ip);
+    return 0;
+}
+
+uint64
+sys_munmap(void)
+{
+  uint64 addr, len;
+  if(argaddr(0, &addr) < 0 || argaddr(1, &len) < 0)
+    return -1;
+
+  return munmap(addr, len);
+}
+
+uint64
+munmap(uint64 addr, uint64 len)
+{
+  int found = 0;
+  struct proc *p = myproc();
+  struct VMA *VMA = p->vma_head;
+
+  do{
+    // if the mmapped regions are not page aligned these checks probably do not
+    // work since we round the start and the end addresses to agree with page
+    // boundaries
+    if(addr == VMA->end_address || addr+len == VMA->start_address){
+      found = 1;
+      break;
+    }
+  } while((VMA=VMA->next));
+
+  if(!found)
+    panic("no valid VMA for unmapping");
+
+  if(addr < VMA->end_address || addr+len > VMA->start_address)
+    panic("seemingly valid VMA some parameter outside range");
+
+  if(VMA->flags & MAP_SHARED){
+      begin_op();
+      ilock(VMA->f->ip);
+      // this returns something smaller than len if not all could be written,
+      // the operation is in that case abandoned but we are fine with that,
+      // these are the regions that had not been mapped anyway
+      writei(VMA->f->ip, 1, addr, addr-VMA->end_address+VMA->offset, len);
+      iunlock(VMA->f->ip);
+      end_op();
+  }
+  uvmunmap(p->pagetable, PGROUNDDOWN(addr), PGROUNDUP(len)/PGSIZE, 1);
+
+
+  if(addr == VMA->end_address && addr+len == VMA->start_address){
+    // make the VMA invalid
+    if(p->vma_head == VMA){
+      p->vma_head = VMA->next;
+    }
+    if(VMA->prev)
+      VMA->prev->next = VMA->next; 
+    
+    if(VMA->next)
+      VMA->next->prev = VMA->prev; 
+
+    VMA->valid = 0;
+    VMA->mapped = 0;
+    fileclose(VMA->f);
+    return 0;
+  }
+
+  // need to insert a new VMA into the newly freed regions
+
+  struct VMA *new_vma = 0;
+  for(int i=0; i<16; i++){
+    if(!p->VMA[i].valid){
+      new_vma = &p->VMA[i];
+      break;
+    }
+  }
+
+  if(!new_vma)
+    panic("munmap: not enough vma");
+
+  // more efficient technically if we expand neighbouring free regions if
+  // available
+  if(addr == VMA->end_address){
+    new_vma->end_address = VMA->end_address;
+    VMA->end_address = PGROUNDUP(VMA->end_address+len);
+    VMA->length = VMA->start_address - VMA->end_address;
+
+    VMA->offset += len; // add to the offset since we lose starting parts of the file
+    new_vma->start_address = VMA->end_address-1;
+    new_vma->length = new_vma->start_address - VMA->end_address;
+    new_vma->valid = 1;
+    new_vma->mapped = 0;
+    new_vma->prev = VMA;
+    new_vma->next = VMA->next;
+    VMA->next = new_vma;
+    return 0;
+  }
+
+  if(addr+len == VMA->start_address){
+    if(p->vma_head == VMA){
+      p->vma_head = new_vma;
+    }
+    new_vma->start_address = VMA->start_address;
+    VMA->start_address = PGROUNDDOWN(addr)-1;
+    VMA->length = VMA->start_address - VMA->end_address;
+
+    new_vma->end_address = PGROUNDDOWN(addr);
+    new_vma->length = new_vma->start_address - VMA->end_address;
+    new_vma->valid = 1;
+    new_vma->mapped = 0;
+    new_vma->prev = VMA->prev;
+    new_vma->next = VMA;
+    VMA->prev = new_vma;
+    return 0;
+  }
+
+  return -1;
+}

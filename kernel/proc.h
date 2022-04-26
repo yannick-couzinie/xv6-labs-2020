@@ -82,6 +82,20 @@ struct trapframe {
 
 enum procstate { UNUSED, SLEEPING, RUNNABLE, RUNNING, ZOMBIE };
 
+struct VMA {
+  struct file *f;
+  struct VMA *next;
+  struct VMA *prev;
+  uint64 start_address;
+  uint64 end_address;
+  uint64 length;
+  uint64 offset;
+  int prot;
+  int flags;
+  int valid; // is this vma part of the vma list
+  int mapped; // is this a mapped or free region
+};
+
 // Per-process state
 struct proc {
   struct spinlock lock;
@@ -102,5 +116,7 @@ struct proc {
   struct context context;      // swtch() here to run process
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
+  struct VMA VMA[16];          // list of all possible VMA we could have, so we cannot have more than 16 memory fragments
+  struct VMA *vma_head;        // the vma are in a linked list outlining the memory area, this is the head of the list
   char name[16];               // Process name (debugging)
 };
