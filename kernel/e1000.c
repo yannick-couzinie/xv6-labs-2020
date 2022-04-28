@@ -19,7 +19,7 @@ static struct mbuf *rx_mbufs[RX_RING_SIZE];
 // remember where the e1000's registers live.
 static volatile uint32 *regs;
 
-struct spinlock e1000_lock;
+struct spinlock e1000_lock, e1000_recv_lock, e1000_transmit_lock;
 
 // called by pci_init().
 // xregs is the memory address at which the
@@ -30,6 +30,8 @@ e1000_init(uint32 *xregs)
   int i;
 
   initlock(&e1000_lock, "e1000");
+  initlock(&e1000_recv_lock, "e1000_recv");
+  initlock(&e1000_transmit_lock, "e1000_tran");
 
   regs = xregs;
 
@@ -95,26 +97,60 @@ e1000_init(uint32 *xregs)
 int
 e1000_transmit(struct mbuf *m)
 {
-  //
-  // Your code here.
-  //
-  // the mbuf contains an ethernet frame; program it into
-  // the TX descriptor ring so that the e1000 sends it. Stash
-  // a pointer so that it can be freed after sending.
-  //
+  acquire(&e1000_transmit_lock);
+  struct tx_desc *next_packet = &tx_ring[regs[E1000_TDT]];
+
+  if(!(next_packet->status & E1000_TXD_STAT_DD)){
+    release(&e1000_transmit_lock);
+    return -1;
+  }
+
+  if(tx_mbufs[regs[E1000_TDT]])
+    mbuffree(tx_mbufs[regs[E1000_TDT]]);
+
+  tx_mbufs[regs[E1000_TDT]] = m;
+
+  // per document [3.3.3] Table 3.9 there is a maximum length and we should
+  // make a for loop that continuously populates the ring for as long as
+  // necessary, but let's see first whether it works like this.
+  next_packet->addr = (uint64) m->head;
+  next_packet->length = m->len;
+  next_packet->cmd = E1000_TXD_CMD_RS | E1000_TXD_CMD_EOP;
+  next_packet->status = 0;
+
+  regs[E1000_TDT] = (regs[E1000_TDT] + 1) % TX_RING_SIZE;
   
+  release(&e1000_transmit_lock);
+
   return 0;
 }
 
 static void
 e1000_recv(void)
 {
-  //
-  // Your code here.
-  //
-  // Check for packets that have arrived from the e1000
-  // Create and deliver an mbuf for each packet (using net_rx()).
-  //
+  acquire(&e1000_recv_lock);
+
+  int idx = (regs[E1000_RDT] + 1) % RX_RING_SIZE;
+
+  while(rx_ring[idx].status & E1000_RXD_STAT_DD){
+
+    rx_mbufs[idx]->len = rx_ring[idx].length;
+
+    net_rx(rx_mbufs[idx]);
+
+    rx_mbufs[idx] = mbufalloc(0);
+    if (!rx_mbufs[idx])
+      panic("e1000");
+
+    rx_ring[idx].addr = (uint64) rx_mbufs[idx]->head;
+
+    rx_ring[idx].status = 0;
+
+    regs[E1000_RDT] = idx;
+
+    idx = (regs[E1000_RDT] + 1) % RX_RING_SIZE;
+  }
+  release(&e1000_recv_lock);
 }
 
 void
